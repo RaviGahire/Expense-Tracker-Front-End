@@ -1,4 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
+import { LoginPage, RegisterPage } from "../features/auth";
+import { DashboardPage } from "../features/dashboard";
+import { TransactionsPage } from "../features/transactions";
 interface PlaceholderPageProps {
     title: string;
 }
@@ -16,13 +19,13 @@ export const AppRouter = () => {
     return (
         <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<PlaceholderPage title="Dashboard" />} />
-            <Route path="/transactions" element={<PlaceholderPage title="Transactions" />} />
+            <Route path="/dashboard" element={<DashboardPage/>} />
+            <Route path="/transactions" element={<TransactionsPage/>} />
             <Route path="/budgets" element={<PlaceholderPage title="Budgets" />} />
             <Route path="/analytics" element={<PlaceholderPage title="Analytics" />} />
             <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
-            <Route path="/login" element={<PlaceholderPage title="Log In" />} />
-            <Route path="/register" element={<PlaceholderPage title="Register" />} />
+            <Route path="/login" element={<LoginPage  />} />
+            <Route path="/register" element={<RegisterPage />} />
             <Route path="*" element={<PlaceholderPage title="404 - Page Not Found" />} />
         </Routes>
     );
