@@ -6,6 +6,7 @@ import { CategoriesPage } from "../features/categories";
 import { BudgetsPage } from "../features/budgets";
 import { RecurringPage } from "../features/recurring";
 import { AnalyticsPage } from "../features/analytics";
+import { GoalsPage } from "../features/goals";
 interface PlaceholderPageProps {
     title: string;
 }
@@ -28,6 +29,7 @@ export const AppRouter = () => {
             <Route path="/budgets" element={<BudgetsPage/>} />
             <Route path="/recurring" element={<RecurringPage />} />
             <Route path="/analytics" element={<AnalyticsPage/>} />
+            <Route path="/goals" element={<GoalsPage />} />
             <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
             <Route path="/login" element={<LoginPage  />} />
             <Route path="/register" element={<RegisterPage />} />
