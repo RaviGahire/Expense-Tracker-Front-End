@@ -5,7 +5,8 @@ export type RecurringFrequency =
   | 'weekly'
   | 'biweekly'
   | 'monthly'
-  | 'yearly';
+  | 'yearly'
+  | 'quarterly';
 
 export type RecurringRuleStatus = 'active' | 'paused' | 'completed';
 

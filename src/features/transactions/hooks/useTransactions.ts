@@ -9,8 +9,7 @@ import {
   countActiveFilters,
   type TransactionFilterState,
 } from '../components/TransactionFilters';
-import { recurringService ,advanceRecurringDate } from '../../recurring';
-import type { TransactionFormValues } from '../components/TransactionForm';
+import { recurringService, advanceRecurringDate } from '../../recurring';
 
 export interface FilteredTotals {
   income: number;
@@ -182,14 +181,11 @@ export function useTransactions(initialPageSize: number = 10): UseTransactionsRe
     return filteredTransactions.slice(startIndex, startIndex + pageSize);
   }, [filteredTransactions, safePage, pageSize]);
 
-const createTransaction = useCallback(
-    async (payload: TransactionFormValues, attachmentFile?: File | null) => {
+  const createTransaction = useCallback(
+    async (payload: TransactionSubmitPayload) => {
       try {
         setIsMutating(true);
-        const created = await transactionService.create(
-          payload,
-          attachmentFile
-        );
+        const created = await transactionService.create(payload);
         setTransactions((prev) => [created, ...prev]);
 
         // Automatically register a recurring rule when the toggle is enabled
@@ -216,8 +212,6 @@ const createTransaction = useCallback(
             notes: payload.notes,
           });
         }
-
-        return created;
       } finally {
         setIsMutating(false);
       }

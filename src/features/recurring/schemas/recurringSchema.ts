@@ -3,12 +3,12 @@ import type {
   RecurringFrequency,
   RecurringRuleStatus,
 } from '../types/recurring.types';
-
 const FREQUENCY_VALUES = [
   'daily',
   'weekly',
   'biweekly',
   'monthly',
+  'quarterly',
   'yearly',
 ] as const satisfies readonly RecurringFrequency[];
 
