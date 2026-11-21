@@ -7,7 +7,6 @@ import { Card } from "./ui/Card";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Modal } from "./ui/Modal";
 import { ProgressBar } from "./ui/ProgressBar";
-
 // Feedback Components
 import { EmptyState } from "./feedback/EmptyState";
 import { ErrorBoundary } from "./feedback/ErrorBoundary";
