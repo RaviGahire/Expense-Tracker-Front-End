@@ -1,35 +1,23 @@
 import { useEffect, type ReactNode } from 'react';
 import { IconX } from '@tabler/icons-react';
-import { Button } from './Button';
-
-export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 
 export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
-  title?: string;
+  title: string;
   description?: string;
-  size?: ModalSize;
   children: ReactNode;
-  footer?: ReactNode;
+  maxWidthClass?: string;
 }
 
-const sizeStyles: Record<ModalSize, string> = {
-  sm: 'max-w-md',
-  md: 'max-w-lg',
-  lg: 'max-w-2xl',
-  xl: 'max-w-4xl',
-};
-
-export const Modal = ({
+export function Modal({
   isOpen,
   onClose,
   title,
   description,
-  size = 'md',
   children,
-  footer,
-}: ModalProps) =>{
+  maxWidthClass = 'max-w-lg',
+}: ModalProps) {
   useEffect(() => {
     if (!isOpen) return;
 
@@ -52,60 +40,44 @@ export const Modal = ({
 
   return (
     <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-xs"
+      onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-labelledby={title ? 'modal-title' : undefined}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      aria-labelledby="modal-title"
     >
-      {/* Backdrop */}
       <div
-        aria-hidden="true"
-        onClick={onClose}
-        className="fixed inset-0 bg-canvas/80 backdrop-blur-xs transition-opacity"
-      />
-
-      {/* Dialog Panel */}
-      <div
-        className={`relative z-10 w-full ${sizeStyles[size]} rounded-2xl border border-subtle bg-surface p-6 shadow-2xl shadow-black/50`}
+        onClick={(e) => e.stopPropagation()}
+        className={`flex max-h-[90vh] w-full ${maxWidthClass} flex-col overflow-hidden rounded-2xl border border-subtle bg-surface shadow-2xl`}
       >
-        {/* Header */}
-        {(title || description) && (
-          <div className="mb-5 flex items-start justify-between gap-4">
-            <div>
-              {title && (
-                <h2
-                  id="modal-title"
-                  className="text-lg font-semibold text-ink-primary"
-                >
-                  {title}
-                </h2>
-              )}
-              {description && (
-                <p className="mt-1 text-sm text-ink-secondary">{description}</p>
-              )}
-            </div>
-
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Close modal"
-              onClick={onClose}
-              className="-mr-1.5 -mt-1.5 shrink-0"
+        {/* Pinned Header (Never clips off top) */}
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-subtle px-5 py-4">
+          <div className="min-w-0">
+            <h2
+              id="modal-title"
+              className="text-lg font-bold tracking-tight text-ink-primary"
             >
-              <IconX className="h-5 w-5" stroke={2} />
-            </Button>
+              {title}
+            </h2>
+            {description && (
+              <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
+                {description}
+              </p>
+            )}
           </div>
-        )}
 
-        {/* Body */}
-        <div>{children}</div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close modal"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-ink-secondary transition-colors hover:bg-surface-elevated hover:text-ink-primary"
+          >
+            <IconX className="h-5 w-5" stroke={1.75} />
+          </button>
+        </div>
 
-        {/* Optional Footer */}
-        {footer && (
-          <div className="mt-6 flex items-center justify-end gap-3 border-t border-subtle pt-4">
-            {footer}
-          </div>
-        )}
+        {/* Scrollable Content Area */}
+        <div className="overflow-y-auto px-5 py-4">{children}</div>
       </div>
     </div>
   );
