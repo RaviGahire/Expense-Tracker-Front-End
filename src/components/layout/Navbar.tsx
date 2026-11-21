@@ -6,6 +6,7 @@ import {
     IconX,
     IconLayoutDashboard,
     IconReceipt,
+    IconTag,
     IconPigMoney,
     IconChartBar,
     IconSettings,
@@ -19,6 +20,7 @@ import { ConfirmDialog } from "../ui/ConfirmDialog";
 const NAV_LINKS = [
     { path: "/dashboard", label: "Dashboard", icon: IconLayoutDashboard },
     { path: "/transactions", label: "Transactions", icon: IconReceipt },
+    { path: "/categories", label: "Categories", icon: IconTag },
     { path: "/budgets", label: "Budgets", icon: IconPigMoney },
     { path: "/analytics", label: "Analytics", icon: IconChartBar },
 ];
@@ -28,11 +30,11 @@ export const Navbar = () => {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
     const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
+
     // Authentication state
     const { user, isAuthenticated, logout } = useAuth();
 
-    //   Handle logout
-
+    // Handle logout
     const openLogoutDialog = () => {
         setProfileDropdownOpen(false);
         setMobileMenuOpen(false);
@@ -67,7 +69,7 @@ export const Navbar = () => {
                                     key={path}
                                     to={path}
                                     className={({ isActive }) =>
-                                        `flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200 ${
+                                        `flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors duration-200 ${
                                             isActive
                                                 ? "bg-brand/10 text-brand"
                                                 : "text-ink-secondary hover:bg-surface-elevated hover:text-ink-primary"
@@ -289,6 +291,7 @@ export const Navbar = () => {
                     </>
                 )}
             </nav>
+
             {/* Logout Confirmation Dialog */}
             <ConfirmDialog
                 isOpen={logoutDialogOpen}
