@@ -8,18 +8,7 @@ import { RecurringPage } from "../features/recurring";
 import { AnalyticsPage } from "../features/analytics";
 import { GoalsPage } from "../features/goals";
 import { AccountsPage } from "../features/accounts";
-interface PlaceholderPageProps {
-    title: string;
-}
-
-function PlaceholderPage({ title }: PlaceholderPageProps) {
-    return (
-        <div className="rounded-2xl border border-subtle bg-surface p-8">
-            <h1 className="text-2xl font-bold text-ink-primary">{title}</h1>
-            <p className="mt-2 text-sm text-ink-secondary">{title} page is ready</p>
-        </div>
-    );
-}
+import { NotFoundPage } from "../pages/NotFoundPage";
 
 export const AppRouter = () => {
     return (
@@ -39,8 +28,8 @@ export const AppRouter = () => {
             {/* Auth Routes */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
-
-            <Route path="*" element={<PlaceholderPage title="404 - Page Not Found" />} />
+            {/* Fallback Route */}
+            <Route path="*" element={<NotFoundPage />} />
         </Routes>
     );
 };
