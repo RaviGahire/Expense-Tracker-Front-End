@@ -11,6 +11,7 @@ import {
     IconChartBar,
     IconSettings,
     IconLogout,
+    IconRepeat,
 } from "@tabler/icons-react";
 import { Button } from "../ui/Button";
 import { useAuth } from "../../features/auth";
@@ -23,6 +24,7 @@ const NAV_LINKS = [
     { path: "/categories", label: "Categories", icon: IconTag },
     { path: "/budgets", label: "Budgets", icon: IconPigMoney },
     { path: "/analytics", label: "Analytics", icon: IconChartBar },
+    { path: '/recurring', label: 'Recurring', icon: IconRepeat }
 ];
 
 export const Navbar = () => {

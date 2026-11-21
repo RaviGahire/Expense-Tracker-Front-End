@@ -9,6 +9,8 @@ import {
   countActiveFilters,
   type TransactionFilterState,
 } from '../components/TransactionFilters';
+import { recurringService ,advanceRecurringDate } from '../../recurring';
+import type { TransactionFormValues } from '../components/TransactionForm';
 
 export interface FilteredTotals {
   income: number;
@@ -180,13 +182,42 @@ export function useTransactions(initialPageSize: number = 10): UseTransactionsRe
     return filteredTransactions.slice(startIndex, startIndex + pageSize);
   }, [filteredTransactions, safePage, pageSize]);
 
-  const createTransaction = useCallback(
-    async (payload: TransactionSubmitPayload) => {
+const createTransaction = useCallback(
+    async (payload: TransactionFormValues, attachmentFile?: File | null) => {
       try {
         setIsMutating(true);
-        const created = await transactionService.create(payload);
+        const created = await transactionService.create(
+          payload,
+          attachmentFile
+        );
         setTransactions((prev) => [created, ...prev]);
-        setCurrentPage(1);
+
+        // Automatically register a recurring rule when the toggle is enabled
+        if (payload.recurring?.isRecurring) {
+          const frequency = payload.recurring.frequency ?? 'monthly';
+          const resolvedNextDate =
+            payload.recurring.nextDate &&
+            payload.recurring.nextDate > payload.date
+              ? payload.recurring.nextDate
+              : advanceRecurringDate(payload.date, frequency);
+
+          await recurringService.create({
+            title: payload.title,
+            amount: payload.amount,
+            type: payload.type,
+            category: payload.category,
+            paymentMethod: payload.paymentMethod,
+            frequency,
+            startDate: payload.date,
+            nextDate: resolvedNextDate,
+            endDate: payload.recurring.endDate || undefined,
+            status: 'active',
+            autoCreate: true,
+            notes: payload.notes,
+          });
+        }
+
+        return created;
       } finally {
         setIsMutating(false);
       }

@@ -3,6 +3,8 @@ import { LoginPage, RegisterPage } from "../features/auth";
 import { DashboardPage } from "../features/dashboard";
 import { TransactionsPage } from "../features/transactions";
 import { CategoriesPage } from "../features/categories";
+import { BudgetsPage } from "../features/budgets";
+import { RecurringPage } from "../features/recurring";
 interface PlaceholderPageProps {
     title: string;
 }
@@ -22,7 +24,8 @@ export const AppRouter = () => {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage/>} />
             <Route path="/transactions" element={<TransactionsPage/>} />
-            <Route path="/budgets" element={<PlaceholderPage title="Budgets" />} />
+            <Route path="/budgets" element={<BudgetsPage/>} />
+            <Route path="/recurring" element={<RecurringPage />} />
             <Route path="/analytics" element={<PlaceholderPage title="Analytics" />} />
             <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
             <Route path="/login" element={<LoginPage  />} />
