@@ -5,6 +5,7 @@ import { TransactionsPage } from "../features/transactions";
 import { CategoriesPage } from "../features/categories";
 import { BudgetsPage } from "../features/budgets";
 import { RecurringPage } from "../features/recurring";
+import { AnalyticsPage } from "../features/analytics";
 interface PlaceholderPageProps {
     title: string;
 }
@@ -26,7 +27,7 @@ export const AppRouter = () => {
             <Route path="/transactions" element={<TransactionsPage/>} />
             <Route path="/budgets" element={<BudgetsPage/>} />
             <Route path="/recurring" element={<RecurringPage />} />
-            <Route path="/analytics" element={<PlaceholderPage title="Analytics" />} />
+            <Route path="/analytics" element={<AnalyticsPage/>} />
             <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
             <Route path="/login" element={<LoginPage  />} />
             <Route path="/register" element={<RegisterPage />} />

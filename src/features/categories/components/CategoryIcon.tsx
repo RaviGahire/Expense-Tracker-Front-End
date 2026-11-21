@@ -22,6 +22,7 @@ import {
   IconTag,
 } from '@tabler/icons-react';
 
+
 export type CategoryFlowType = 'expense' | 'income';
 
 export type CategoryColorToken =
