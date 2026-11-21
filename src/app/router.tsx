@@ -7,6 +7,7 @@ import { BudgetsPage } from "../features/budgets";
 import { RecurringPage } from "../features/recurring";
 import { AnalyticsPage } from "../features/analytics";
 import { GoalsPage } from "../features/goals";
+import { AccountsPage } from "../features/accounts";
 interface PlaceholderPageProps {
     title: string;
 }
@@ -23,17 +24,22 @@ function PlaceholderPage({ title }: PlaceholderPageProps) {
 export const AppRouter = () => {
     return (
         <Routes>
+            {/* Dashboard Route */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<DashboardPage/>} />
-            <Route path="/transactions" element={<TransactionsPage/>} />
-            <Route path="/budgets" element={<BudgetsPage/>} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            {/* Features Routes */}
+            <Route path="/transactions" element={<TransactionsPage />} />
+            <Route path="/budgets" element={<BudgetsPage />} />
             <Route path="/recurring" element={<RecurringPage />} />
-            <Route path="/analytics" element={<AnalyticsPage/>} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/goals" element={<GoalsPage />} />
-            <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
-            <Route path="/login" element={<LoginPage  />} />
+            <Route path="/accounts" element={<AccountsPage />} />
+
+            {/* Auth Routes */}
+            <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
-            <Route path="/categories" element={<CategoriesPage/>} />
+
             <Route path="*" element={<PlaceholderPage title="404 - Page Not Found" />} />
         </Routes>
     );

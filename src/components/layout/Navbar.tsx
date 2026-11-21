@@ -13,6 +13,7 @@ import {
     IconLogout,
     IconRepeat,
     IconTargetArrow,
+    IconBuildingBank,
 } from "@tabler/icons-react";
 import { Button } from "../ui/Button";
 import { useAuth } from "../../features/auth";
@@ -25,8 +26,8 @@ const NAV_LINKS = [
     { path: "/categories", label: "Categories", icon: IconTag },
     { path: "/budgets", label: "Budgets", icon: IconPigMoney },
     { path: "/analytics", label: "Analytics", icon: IconChartBar },
-    { path: '/recurring', label: 'Recurring', icon: IconRepeat },
-    { path: '/goals', label: 'Goals', icon: IconTargetArrow },
+    { path: "/recurring", label: "Recurring", icon: IconRepeat },
+    { path: "/goals", label: "Goals", icon: IconTargetArrow },
 ];
 
 export const Navbar = () => {
@@ -128,16 +129,16 @@ export const Navbar = () => {
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
-                                                onClick={() => navigate("/settings")}
+                                                onClick={() => navigate("/accounts")}
                                                 leftIcon={
-                                                    <IconSettings
+                                                    <IconBuildingBank
                                                         className="h-4 w-4"
                                                         stroke={1.75}
                                                     />
                                                 }
                                                 className="w-full justify-start text-sm font-normal"
                                             >
-                                                Settings
+                                                Account
                                             </Button>
 
                                             {/* Log out Btn */}
