@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import {
   IconArrowUpRight,
   IconArrowDownRight,
@@ -6,20 +5,11 @@ import {
   IconTrash,
   IconRepeat,
   IconPaperclip,
-  IconToolsKitchen2 ,
-  IconHome,
-  IconCar,
-  IconShoppingBag,
-  IconBolt,
-  IconBriefcase,
-  IconDeviceLaptop,
-  IconHeartbeat,
-  IconBook,
-  IconGift,
-  IconCategory,
 } from '@tabler/icons-react';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
+import { useCategoriesContext } from '../../categories/context/CategoriesContext';
+import { CategoryIcon } from '../../categories/components/CategoryIcon';
 import type { TransactionFormType } from './TransactionForm';
 import type { RecurringConfig } from './RecurringFields';
 import type { ExistingAttachment } from './AttachmentUpload';
@@ -68,90 +58,6 @@ export function formatTransactionDate(dateString: string): string {
   }).format(parsed);
 }
 
-export function getCategoryVisual(
-  category: string,
-  type: TransactionFormType
-): { icon: ReactNode; badgeClass: string } {
-  const normalized = category.trim().toLowerCase();
-
-  if (type === 'income') {
-    if (normalized.includes('salary') || normalized.includes('job')) {
-      return {
-        icon: <IconBriefcase className="h-4 w-4" stroke={1.75} />,
-        badgeClass: 'bg-income/15 text-income',
-      };
-    }
-    if (normalized.includes('freelance') || normalized.includes('client')) {
-      return {
-        icon: <IconDeviceLaptop className="h-4 w-4" stroke={1.75} />,
-        badgeClass: 'bg-income/15 text-income',
-      };
-    }
-    if (normalized.includes('bonus') || normalized.includes('gift')) {
-      return {
-        icon: <IconGift className="h-4 w-4" stroke={1.75} />,
-        badgeClass: 'bg-income/15 text-income',
-      };
-    }
-    return {
-      icon: <IconArrowUpRight className="h-4 w-4" stroke={1.75} />,
-      badgeClass: 'bg-income/15 text-income',
-    };
-  }
-
-  if (normalized.includes('food') || normalized.includes('dining')) {
-    return {
-      icon: <IconToolsKitchen2  className="h-4 w-4" stroke={1.75} />,
-      badgeClass: 'bg-warning/15 text-warning',
-    };
-  }
-  if (normalized.includes('rent') || normalized.includes('housing')) {
-    return {
-      icon: <IconHome className="h-4 w-4" stroke={1.75} />,
-      badgeClass: 'bg-brand/15 text-brand',
-    };
-  }
-  if (
-    normalized.includes('transport') ||
-    normalized.includes('travel') ||
-    normalized.includes('fuel')
-  ) {
-    return {
-      icon: <IconCar className="h-4 w-4" stroke={1.75} />,
-      badgeClass: 'bg-accent/15 text-accent',
-    };
-  }
-  if (normalized.includes('shop')) {
-    return {
-      icon: <IconShoppingBag className="h-4 w-4" stroke={1.75} />,
-      badgeClass: 'bg-expense/15 text-expense',
-    };
-  }
-  if (normalized.includes('bill') || normalized.includes('utilit')) {
-    return {
-      icon: <IconBolt className="h-4 w-4" stroke={1.75} />,
-      badgeClass: 'bg-warning/15 text-warning',
-    };
-  }
-  if (normalized.includes('health') || normalized.includes('medical')) {
-    return {
-      icon: <IconHeartbeat className="h-4 w-4" stroke={1.75} />,
-      badgeClass: 'bg-expense/15 text-expense',
-    };
-  }
-  if (normalized.includes('educat') || normalized.includes('course')) {
-    return {
-      icon: <IconBook className="h-4 w-4" stroke={1.75} />,
-      badgeClass: 'bg-accent/15 text-accent',
-    };
-  }
-
-  return {
-    icon: <IconCategory className="h-4 w-4" stroke={1.75} />,
-    badgeClass: 'bg-surface-elevated text-ink-secondary',
-  };
-}
-
 export function TransactionItem({
   transaction,
   currency = 'INR',
@@ -159,8 +65,10 @@ export function TransactionItem({
   onEdit,
   onDelete,
 }: TransactionItemProps) {
+  const { getCategoryByValue } = useCategoriesContext();
+
   const isIncome = transaction.type === 'income';
-  const visual = getCategoryVisual(transaction.category, transaction.type);
+  const matchedCategory = getCategoryByValue(transaction.category);
   const formattedAmount = formatTransactionCurrency(transaction.amount, currency);
   const formattedDate = formatTransactionDate(transaction.date);
 
@@ -170,11 +78,13 @@ export function TransactionItem({
         {/* Top Row: Category Icon, Title, Date & Signed Amount */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <div
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${visual.badgeClass}`}
-            >
-              {visual.icon}
-            </div>
+            <CategoryIcon
+              name={matchedCategory?.iconName}
+              label={transaction.category}
+              type={transaction.type}
+              color={matchedCategory?.color}
+              size="md"
+            />
 
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-ink-primary">
@@ -262,11 +172,13 @@ export function TransactionItem({
       {/* Title + Notes + Recurring/Attachment Indicators */}
       <td className="px-6 py-4">
         <div className="flex items-center gap-3.5">
-          <div
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${visual.badgeClass}`}
-          >
-            {visual.icon}
-          </div>
+          <CategoryIcon
+            name={matchedCategory?.iconName}
+            label={transaction.category}
+            type={transaction.type}
+            color={matchedCategory?.color}
+            size="md"
+          />
 
           <div className="min-w-0">
             <div className="flex items-center gap-2">

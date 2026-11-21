@@ -1,24 +1,24 @@
 import { useMemo, type ChangeEvent } from "react";
 import {
-    
     IconFilter,
-    IconTag,
     IconArrowsSort,
     IconCalendar,
     IconCreditCard,
     IconRotateClockwise,
-    
 } from "@tabler/icons-react";
 import { Card } from "../../../components/ui/Card";
 import { Input } from "../../../components/ui/Input";
 import { SelectInput } from "../../../components/ui/SelectInput";
 import { Button } from "../../../components/ui/Button";
 import { Badge } from "../../../components/ui/Badge";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, PAYMENT_METHOD_OPTIONS } from "./TransactionForm";
+import { PAYMENT_METHOD_OPTIONS } from "./TransactionForm";
 import { SearchBar } from "./SearchBar";
-import { type FilterTransactionType } from "../types/types";
-import { type TransactionSortBy } from "../types/types";
-
+import { type FilterTransactionType, type TransactionSortBy } from "../types/types";
+import { useCategoriesContext } from "../../categories/context/CategoriesContext";
+import {
+    CategorySelect,
+    DEFAULT_CATEGORY_OPTIONS,
+} from "../../categories/components/CategorySelect";
 
 export interface TransactionFilterState {
     search: string;
@@ -81,29 +81,10 @@ export function TransactionFilters({
     filteredCount,
     disabled = false,
 }: TransactionFiltersProps) {
-    // Dynamically scope category dropdown based on selected Type ('all', 'expense', 'income')
-    const categoryOptions = useMemo(() => {
-        const base = [{ value: "all", label: "All Categories" }];
+    const { categories } = useCategoriesContext();
 
-        if (filters.type === "expense") {
-            return [...base, ...EXPENSE_CATEGORIES];
-        }
-        if (filters.type === "income") {
-            return [...base, ...INCOME_CATEGORIES];
-        }
-
-        const mergedMap = new Map<string, string>();
-        [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES].forEach((item) => {
-            mergedMap.set(item.value, item.label);
-        });
-
-        const uniqueCategories = Array.from(mergedMap.entries()).map(([value, label]) => ({
-            value,
-            label,
-        }));
-
-        return [...base, ...uniqueCategories];
-    }, [filters.type]);
+    const resolvedCategories =
+        categories.length > 0 ? categories : DEFAULT_CATEGORY_OPTIONS;
 
     const paymentOptions = useMemo(
         () => [{ value: "all", label: "All Payment Methods" }, ...PAYMENT_METHOD_OPTIONS],
@@ -119,15 +100,15 @@ export function TransactionFilters({
         if (name === "type") {
             const nextType = value as FilterTransactionType;
             const validSet =
-                nextType === "expense"
-                    ? EXPENSE_CATEGORIES
-                    : nextType === "income"
-                      ? INCOME_CATEGORIES
-                      : [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES];
+                nextType === "all"
+                    ? resolvedCategories
+                    : resolvedCategories.filter((item) => item.type === nextType);
 
             const keepsCategory =
                 filters.category === "all" ||
-                validSet.some((item) => item.value === filters.category);
+                validSet.some(
+                    (item) => item.value.toLowerCase() === filters.category.trim().toLowerCase()
+                );
 
             onChange({
                 ...filters,
@@ -143,6 +124,12 @@ export function TransactionFilters({
         });
     };
 
+    const handleCategoryChange = (nextCategory: string) => {
+        onChange({
+            ...filters,
+            category: nextCategory,
+        });
+    };
 
     return (
         <Card className="space-y-4">
@@ -177,14 +164,14 @@ export function TransactionFilters({
 
                 {/* Category Filter */}
                 <div className="lg:col-span-3">
-                    <SelectInput
-                        aria-label="Filter by category"
-                        name="category"
+                    <CategorySelect
                         value={filters.category}
-                        onChange={handleFieldChange}
-                        options={categoryOptions}
+                        onChange={handleCategoryChange}
+                        categories={resolvedCategories}
+                        filterByType={filters.type}
+                        includeAllOption
+                        allOptionLabel="All Categories"
                         disabled={disabled}
-                        leftIcon={<IconTag className="h-4 w-4" stroke={1.75} />}
                     />
                 </div>
 

@@ -1,9 +1,9 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   IconArrowDownRight,
   IconArrowUpRight,
   IconCurrencyRupee,
-  IconTag,
   IconCalendar,
   IconCreditCard,
   IconNotes,
@@ -21,6 +21,12 @@ import {
   AttachmentUpload,
   type ExistingAttachment,
 } from './AttachmentUpload';
+import { useCategoriesContext } from '../../categories/context/CategoriesContext';
+import {
+  CategorySelect,
+  DEFAULT_CATEGORY_OPTIONS,
+  type CategoryOptionItem,
+} from '../../categories/components/CategorySelect';
 
 export type TransactionFormType = 'expense' | 'income';
 
@@ -93,14 +99,23 @@ function getTodayDateString(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-function getDefaultCategory(type: TransactionFormType): string {
+function getDefaultCategory(
+  type: TransactionFormType,
+  availableCategories?: CategoryOptionItem[]
+): string {
+  if (availableCategories && availableCategories.length > 0) {
+    const firstMatch = availableCategories.find((cat) => cat.type === type);
+    if (firstMatch) return firstMatch.value;
+  }
+
   return type === 'expense'
     ? EXPENSE_CATEGORIES[0].value
     : INCOME_CATEGORIES[0].value;
 }
 
 function buildInitialState(
-  initialValues?: Partial<TransactionFormValues>
+  initialValues?: Partial<TransactionFormValues>,
+  availableCategories?: CategoryOptionItem[]
 ): InternalFormState {
   const resolvedType: TransactionFormType = initialValues?.type || 'expense';
   return {
@@ -110,8 +125,11 @@ function buildInitialState(
         ? String(initialValues.amount)
         : '',
     type: resolvedType,
-    category: initialValues?.category || getDefaultCategory(resolvedType),
-    paymentMethod: initialValues?.paymentMethod || PAYMENT_METHOD_OPTIONS[0].value,
+    category:
+      initialValues?.category ||
+      getDefaultCategory(resolvedType, availableCategories),
+    paymentMethod:
+      initialValues?.paymentMethod || PAYMENT_METHOD_OPTIONS[0].value,
     date: initialValues?.date || getTodayDateString(),
     notes: initialValues?.notes ?? '',
   };
@@ -142,8 +160,14 @@ export function TransactionForm({
   serverError = null,
   submitLabel,
 }: TransactionFormProps) {
+  const navigate = useNavigate();
+  const { categories } = useCategoriesContext();
+
+  const resolvedCategories =
+    categories.length > 0 ? categories : DEFAULT_CATEGORY_OPTIONS;
+
   const [values, setValues] = useState<InternalFormState>(() =>
-    buildInitialState(initialValues)
+    buildInitialState(initialValues, resolvedCategories)
   );
   const [recurring, setRecurring] = useState<RecurringConfig>(() =>
     buildInitialRecurring(initialValues)
@@ -155,7 +179,7 @@ export function TransactionForm({
 
   // Sync form state whenever initialValues changes (e.g. switching between Edit rows)
   useEffect(() => {
-    setValues(buildInitialState(initialValues));
+    setValues(buildInitialState(initialValues, resolvedCategories));
     setRecurring(buildInitialRecurring(initialValues));
     setAttachment(null);
     setRemoveExistingAttachment(false);
@@ -167,10 +191,11 @@ export function TransactionForm({
   const handleTypeSwitch = (nextType: TransactionFormType) => {
     if (values.type === nextType || isSubmitting) return;
 
-    const validCategories =
-      nextType === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
+    const validCategories = resolvedCategories.filter(
+      (cat) => cat.type === nextType
+    );
     const isCurrentCategoryValid = validCategories.some(
-      (cat) => cat.value === values.category
+      (cat) => cat.value.toLowerCase() === values.category.trim().toLowerCase()
     );
 
     setValues((prev) => ({
@@ -178,7 +203,7 @@ export function TransactionForm({
       type: nextType,
       category: isCurrentCategoryValid
         ? prev.category
-        : getDefaultCategory(nextType),
+        : getDefaultCategory(nextType, resolvedCategories),
     }));
 
     setErrors((prev) => ({ ...prev, category: undefined }));
@@ -198,6 +223,20 @@ export function TransactionForm({
       setErrors((prev) => ({
         ...prev,
         [name]: undefined,
+      }));
+    }
+  };
+
+  const handleCategoryChange = (nextCategory: string) => {
+    setValues((prev) => ({
+      ...prev,
+      category: nextCategory,
+    }));
+
+    if (errors.category) {
+      setErrors((prev) => ({
+        ...prev,
+        category: undefined,
       }));
     }
   };
@@ -253,9 +292,6 @@ export function TransactionForm({
 
     await onSubmit(payload);
   };
-
-  const categoryOptions =
-    values.type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
 
   const resolvedSubmitLabel =
     submitLabel ||
@@ -361,15 +397,15 @@ export function TransactionForm({
 
       {/* Category & Payment Method Row */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <SelectInput
+        <CategorySelect
           label="Category"
-          name="category"
           value={values.category}
-          onChange={handleChange}
-          options={categoryOptions}
+          onChange={handleCategoryChange}
+          categories={resolvedCategories}
+          filterByType={values.type}
           error={errors.category}
           disabled={isSubmitting}
-          leftIcon={<IconTag className="h-4 w-4" stroke={1.75} />}
+          onCreateCategory={() => navigate('/categories')}
         />
 
         <SelectInput
