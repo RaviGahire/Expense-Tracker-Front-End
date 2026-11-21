@@ -190,7 +190,7 @@ export function CategoryBreakdownCard({
 
             {/* Center Donut Metric Readout */}
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-5 text-center">
-              <span className="max-w-[96px] truncate text-[11px] font-medium text-ink-muted">
+              <span className="max-w-24 truncate text-[11px] font-medium text-ink-muted">
                 {activeItem
                   ? activeItem.category
                   : type === 'expense'
