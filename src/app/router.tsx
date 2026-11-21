@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { LoginPage, RegisterPage } from "../features/auth";
 import { DashboardPage } from "../features/dashboard";
 import { TransactionsPage } from "../features/transactions";
+import { CategoriesPage } from "../features/categories";
 interface PlaceholderPageProps {
     title: string;
 }
@@ -26,6 +27,7 @@ export const AppRouter = () => {
             <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
             <Route path="/login" element={<LoginPage  />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/categories" element={<CategoriesPage/>} />
             <Route path="*" element={<PlaceholderPage title="404 - Page Not Found" />} />
         </Routes>
     );
