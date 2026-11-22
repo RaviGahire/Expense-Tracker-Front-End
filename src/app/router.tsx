@@ -11,7 +11,7 @@ import { AccountsPage } from "../features/accounts";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { PublicRoute } from "../features/auth/PublicRoute";
 import { ProtectedRoute } from "../features/auth/ProtectedRoute";
-import AppLayout from "../components/layout/AppLayout";
+
 
 export const AppRouter = () => {
     return (

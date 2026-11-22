@@ -224,7 +224,7 @@ export const  QuickAddButton = ({
         onClose={handleClose}
         title="Quick Add Transaction"
         description="Record a new expense or income entry in seconds."
-        size="md"
+        // size="md"
       >
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           {/* Type Switcher (Expense vs Income) */}
