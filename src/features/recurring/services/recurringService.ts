@@ -1,3 +1,6 @@
+import { apiRequest } from '../../../services/apiClient';
+import { accountService } from '../../accounts/services/accountService';
+import { categoryService } from '../../categories/services/categoryService';
 import type {
   RecurringFrequency,
   RecurringPayload,
@@ -6,10 +9,6 @@ import type {
 } from '../types/recurring.types';
 import type { TransactionFormValues } from '../../transactions/components/TransactionForm';
 
-const STORAGE_KEY = 'fintrack_recurring_v1';
-const TOKEN_STORAGE_KEY = 'fintrack_auth_token';
-const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
-
 interface RawRecurringResponse {
   id?: string;
   _id?: string;
@@ -17,13 +16,17 @@ interface RawRecurringResponse {
   amount?: number | string;
   type?: 'expense' | 'income';
   category?: string;
+  categoryId?: string | { _id?: string; id?: string; name?: string; label?: string };
+  accountId?: string | { _id?: string; id?: string; name?: string };
   paymentMethod?: string;
   frequency?: RecurringFrequency;
   startDate?: string;
   nextDate?: string;
+  nextRunDate?: string;
   endDate?: string;
   lastProcessedDate?: string;
   status?: RecurringRuleStatus;
+  isActive?: boolean;
   autoCreate?: boolean;
   notes?: string;
   createdAt?: string;
@@ -34,6 +37,8 @@ export interface TriggeredOccurrenceResult {
   updatedRule: RecurringRule;
   transactionPayload: TransactionFormValues;
 }
+
+const OBJECT_ID_REGEX = /^[0-9a-fA-F]{24}$/;
 
 export function getTodayDateString(): string {
   const now = new Date();
@@ -72,7 +77,7 @@ export function advanceRecurringDate(
   }
 
   if (frequency === 'monthly') {
-    const targetMonthIndex = month; // 0-based next month
+    const targetMonthIndex = month;
     const targetYear = year + Math.floor(targetMonthIndex / 12);
     const normalizedMonth = targetMonthIndex % 12;
     const maxDaysInTargetMonth = new Date(
@@ -84,7 +89,6 @@ export function advanceRecurringDate(
     return formatLocalDate(new Date(targetYear, normalizedMonth, clampedDay));
   }
 
-  // yearly
   const targetYear = year + 1;
   const maxDaysInTargetMonth = new Date(targetYear, month, 0).getDate();
   const clampedDay = Math.min(day, maxDaysInTargetMonth);
@@ -96,13 +100,6 @@ function formatLocalDate(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-}
-
-function generateLocalId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `rec_${crypto.randomUUID()}`;
-  }
-  return `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function isValidFrequency(value: unknown): value is RecurringFrequency {
@@ -119,25 +116,52 @@ function isValidStatus(value: unknown): value is RecurringRuleStatus {
   return value === 'active' || value === 'paused' || value === 'completed';
 }
 
+function extractRefName(
+  ref?: string | { name?: string; label?: string } | null
+): string | undefined {
+  if (!ref || typeof ref === 'string') return undefined;
+  return ref.label ?? ref.name;
+}
+
 function normalizeRule(raw: RawRecurringResponse): RecurringRule {
   const today = getTodayDateString();
   const parsedAmount = Number(raw.amount);
 
+  const categoryName =
+    extractRefName(raw.categoryId) ??
+    (raw.category && !OBJECT_ID_REGEX.test(raw.category) ? raw.category : undefined) ??
+    'Bills & Utilities';
+
+  const accountName =
+    extractRefName(raw.accountId) ?? raw.paymentMethod ?? 'UPI';
+
+  const rawStart = raw.startDate ? String(raw.startDate).slice(0, 10) : today;
+  const rawNext = raw.nextDate ?? raw.nextRunDate ?? raw.startDate;
+  const normalizedNext = rawNext ? String(rawNext).slice(0, 10) : rawStart;
+
+  const derivedStatus: RecurringRuleStatus = isValidStatus(raw.status)
+    ? raw.status
+    : typeof raw.isActive === 'boolean'
+    ? raw.isActive
+      ? 'active'
+      : 'paused'
+    : 'active';
+
   return {
-    id: String(raw.id ?? raw._id ?? generateLocalId()),
+    id: String(raw.id ?? raw._id ?? ''),
     title: String(raw.title ?? 'Untitled Schedule').trim(),
     amount: !Number.isNaN(parsedAmount) && parsedAmount > 0 ? parsedAmount : 0,
     type: raw.type === 'income' ? 'income' : 'expense',
-    category: String(raw.category ?? 'Bills & Utilities').trim(),
-    paymentMethod: String(raw.paymentMethod ?? 'UPI').trim(),
+    category: String(categoryName).trim(),
+    paymentMethod: String(accountName).trim(),
     frequency: isValidFrequency(raw.frequency) ? raw.frequency : 'monthly',
-    startDate: String(raw.startDate ?? today),
-    nextDate: String(raw.nextDate ?? raw.startDate ?? today),
-    endDate: raw.endDate ? String(raw.endDate).trim() : undefined,
+    startDate: rawStart,
+    nextDate: normalizedNext,
+    endDate: raw.endDate ? String(raw.endDate).slice(0, 10) : undefined,
     lastProcessedDate: raw.lastProcessedDate
-      ? String(raw.lastProcessedDate).trim()
+      ? String(raw.lastProcessedDate).slice(0, 10)
       : undefined,
-    status: isValidStatus(raw.status) ? raw.status : 'active',
+    status: derivedStatus,
     autoCreate: typeof raw.autoCreate === 'boolean' ? raw.autoCreate : true,
     notes: raw.notes ? String(raw.notes).trim() : undefined,
     createdAt: raw.createdAt,
@@ -145,256 +169,129 @@ function normalizeRule(raw: RawRecurringResponse): RecurringRule {
   };
 }
 
-function buildSeedRules(): RecurringRule[] {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const nowIso = now.toISOString();
+async function resolveBackendRecurringBody(payload: RecurringPayload) {
+  const accounts = await accountService.getAll();
+  const pm = (payload.paymentMethod ?? '').toLowerCase();
+  const matchedAccount =
+    accounts.find((a) => a.name.toLowerCase() === pm) ??
+    accounts.find((a) => pm.includes('cash') && a.type === 'cash') ??
+    accounts.find((a) => pm.includes('credit') && a.type === 'credit_card') ??
+    accounts.find((a) => pm.includes('upi') && a.type === 'wallet') ??
+    accounts.find((a) => pm.includes('bank') && a.type === 'bank') ??
+    accounts.find((a) => a.isDefault) ??
+    accounts[0];
 
-  const currentMonthStart = formatLocalDate(new Date(year, month, 1));
-  const nextMonthFirst = formatLocalDate(new Date(year, month + 1, 1));
-  const upcomingFiveDays = formatLocalDate(
-    new Date(year, month, now.getDate() + 4)
-  );
-  const upcomingTenDays = formatLocalDate(
-    new Date(year, month, now.getDate() + 10)
-  );
-
-  return [
-    {
-      id: 'seed_rec_salary',
-      title: 'Monthly Salary',
-      amount: 75000,
-      type: 'income',
-      category: 'Salary',
-      paymentMethod: 'Bank Transfer',
-      frequency: 'monthly',
-      startDate: currentMonthStart,
-      nextDate: nextMonthFirst,
-      lastProcessedDate: currentMonthStart,
-      status: 'active',
-      autoCreate: true,
-      notes: 'Primary monthly salary credit',
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-    {
-      id: 'seed_rec_rent',
-      title: 'Apartment Rent',
-      amount: 16500,
-      type: 'expense',
-      category: 'Housing & Rent',
-      paymentMethod: 'Bank Transfer',
-      frequency: 'monthly',
-      startDate: currentMonthStart,
-      nextDate: upcomingFiveDays,
-      status: 'active',
-      autoCreate: true,
-      notes: 'Includes monthly society maintenance',
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-    {
-      id: 'seed_rec_broadband',
-      title: 'Fiber Broadband Plan',
-      amount: 999,
-      type: 'expense',
-      category: 'Bills & Utilities',
-      paymentMethod: 'UPI',
-      frequency: 'monthly',
-      startDate: currentMonthStart,
-      nextDate: upcomingTenDays,
-      status: 'active',
-      autoCreate: true,
-      notes: '300 Mbps unlimited monthly billing',
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-    {
-      id: 'seed_rec_cloud',
-      title: 'Cloud Storage & Dev Tools',
-      amount: 650,
-      type: 'expense',
-      category: 'Subscriptions',
-      paymentMethod: 'Credit Card',
-      frequency: 'monthly',
-      startDate: currentMonthStart,
-      nextDate: nextMonthFirst,
-      status: 'paused',
-      autoCreate: false,
-      notes: 'Paused until next project sprint',
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-  ];
-}
-
-function readStoredRules(): RecurringRule[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      const seeded = buildSeedRules();
-      writeStoredRules(seeded);
-      return seeded;
-    }
-
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed.map((entry) => normalizeRule(entry as RawRecurringResponse));
-  } catch {
-    return [];
+  if (!matchedAccount?.id) {
+    throw new Error('Please create at least one account before adding a recurring rule.');
   }
-}
 
-function writeStoredRules(rules: RecurringRule[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(rules));
-  } catch {
-    // Ignore storage quota errors in restricted browser contexts
+  let categoryId = OBJECT_ID_REGEX.test(payload.category)
+    ? payload.category
+    : undefined;
+
+  if (!categoryId && payload.category) {
+    const categories = await categoryService.getAll();
+    const targetName = payload.category.trim().toLowerCase();
+    const matchedCategory =
+      categories.find(
+        (c) =>
+          c.type === payload.type &&
+          (c.label.toLowerCase() === targetName || c.value.toLowerCase() === targetName)
+      ) ??
+      categories.find(
+        (c) =>
+          c.label.toLowerCase() === targetName || c.value.toLowerCase() === targetName
+      );
+
+    if (matchedCategory?.id && OBJECT_ID_REGEX.test(matchedCategory.id)) {
+      categoryId = matchedCategory.id;
+    } else {
+      const createdCategory = await categoryService.create({
+        label: payload.category.trim(),
+        type: payload.type,
+        color: payload.type === 'income' ? 'income' : 'brand',
+        iconName: 'IconRepeat',
+      });
+      categoryId = createdCategory.id;
+    }
   }
-}
 
-function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+  const nextDate = payload.nextDate || payload.startDate;
+  const status = payload.status ?? 'active';
+
   return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    title: payload.title.trim(),
+    amount: Number(payload.amount),
+    type: payload.type,
+    accountId: matchedAccount.id,
+    categoryId,
+    category: payload.category.trim(),
+    paymentMethod: payload.paymentMethod.trim(),
+    frequency: payload.frequency,
+    startDate: payload.startDate,
+    nextDate,
+    nextRunDate: nextDate,
+    ...(payload.endDate?.trim() ? { endDate: payload.endDate.trim() } : {}),
+    status,
+    isActive: status === 'active',
+    autoCreate: payload.autoCreate,
+    ...(payload.notes?.trim() ? { notes: payload.notes.trim() } : {}),
   };
-}
-
-async function parseErrorMessage(response: Response): Promise<string> {
-  try {
-    const data = await response.json();
-    if (typeof data?.message === 'string' && data.message.trim()) {
-      return data.message;
-    }
-  } catch {
-    // Fall back to HTTP status text
-  }
-  return `Request failed with status ${response.status}`;
 }
 
 export const recurringService = {
   async getAll(): Promise<RecurringRule[]> {
-    if (API_BASE_URL) {
-      const response = await fetch(`${API_BASE_URL}/recurring`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
+    const data = await apiRequest<
+      { rules?: RawRecurringResponse[]; data?: RawRecurringResponse[] } | RawRecurringResponse[]
+    >('/recurring');
 
-      if (!response.ok) {
-        throw new Error(await parseErrorMessage(response));
-      }
+    const list: RawRecurringResponse[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.rules)
+      ? data.rules
+      : Array.isArray(data?.data)
+      ? data.data
+      : [];
 
-      const data = await response.json();
-      const list: RawRecurringResponse[] = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.rules)
-        ? data.rules
-        : Array.isArray(data?.data)
-        ? data.data
-        : [];
-
-      return list.map(normalizeRule);
-    }
-
-    return readStoredRules();
+    return list.map(normalizeRule);
   },
 
   async create(payload: RecurringPayload): Promise<RecurringRule> {
-    if (API_BASE_URL) {
-      const response = await fetch(`${API_BASE_URL}/recurring`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
+    const body = await resolveBackendRecurringBody(payload);
+    const data = await apiRequest<
+      { rule?: RawRecurringResponse; data?: RawRecurringResponse } & RawRecurringResponse
+    >('/recurring', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
 
-      if (!response.ok) {
-        throw new Error(await parseErrorMessage(response));
-      }
-
-      const data = await response.json();
-      const created: RawRecurringResponse = data?.rule ?? data?.data ?? data;
-      return normalizeRule(created);
-    }
-
-    const allRules = readStoredRules();
-    const nowIso = new Date().toISOString();
-
-    const newRule: RecurringRule = {
-      id: generateLocalId(),
-      title: payload.title.trim(),
-      amount: Number(payload.amount),
-      type: payload.type,
-      category: payload.category.trim(),
-      paymentMethod: payload.paymentMethod.trim(),
-      frequency: payload.frequency,
-      startDate: payload.startDate,
-      nextDate: payload.nextDate,
-      endDate: payload.endDate?.trim() || undefined,
-      status: payload.status ?? 'active',
-      autoCreate: payload.autoCreate,
-      notes: payload.notes?.trim() || undefined,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
-
-    writeStoredRules([newRule, ...allRules]);
-    return newRule;
+    const created: RawRecurringResponse = data?.rule ?? data?.data ?? data;
+    return normalizeRule({
+      ...created,
+      category: created.category ?? payload.category,
+      paymentMethod: created.paymentMethod ?? payload.paymentMethod,
+    });
   },
 
   async update(id: string, payload: RecurringPayload): Promise<RecurringRule> {
-    if (API_BASE_URL) {
-      const response = await fetch(
-        `${API_BASE_URL}/recurring/${encodeURIComponent(id)}`,
-        {
-          method: 'PUT',
-          headers: getAuthHeaders(),
-          body: JSON.stringify(payload),
-        }
-      );
+    const body = await resolveBackendRecurringBody(payload);
+    const data = await apiRequest<
+      { rule?: RawRecurringResponse; data?: RawRecurringResponse } & RawRecurringResponse
+    >(`/recurring/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ...body,
+        endDate: payload.endDate?.trim() || null,
+        notes: payload.notes?.trim() || null,
+      }),
+    });
 
-      if (!response.ok) {
-        throw new Error(await parseErrorMessage(response));
-      }
-
-      const data = await response.json();
-      const updated: RawRecurringResponse = data?.rule ?? data?.data ?? data;
-      return normalizeRule(updated);
-    }
-
-    const allRules = readStoredRules();
-    const index = allRules.findIndex((item) => item.id === id);
-
-    if (index === -1) {
-      throw new Error('Recurring schedule not found.');
-    }
-
-    const updatedRule: RecurringRule = {
-      ...allRules[index],
-      title: payload.title.trim(),
-      amount: Number(payload.amount),
-      type: payload.type,
-      category: payload.category.trim(),
-      paymentMethod: payload.paymentMethod.trim(),
-      frequency: payload.frequency,
-      startDate: payload.startDate,
-      nextDate: payload.nextDate,
-      endDate: payload.endDate?.trim() || undefined,
-      status: payload.status ?? allRules[index].status,
-      autoCreate: payload.autoCreate,
-      notes: payload.notes?.trim() || undefined,
-      updatedAt: new Date().toISOString(),
-    };
-
-    const nextList = [...allRules];
-    nextList[index] = updatedRule;
-    writeStoredRules(nextList);
-
-    return updatedRule;
+    const updated: RawRecurringResponse = data?.rule ?? data?.data ?? data;
+    return normalizeRule({
+      ...updated,
+      category: updated.category ?? payload.category,
+      paymentMethod: updated.paymentMethod ?? payload.paymentMethod,
+    });
   },
 
   async toggleStatus(id: string): Promise<RecurringRule> {
@@ -408,41 +305,24 @@ export const recurringService = {
     const nextStatus: RecurringRuleStatus =
       target.status === 'active' ? 'paused' : 'active';
 
-    return this.update(id, {
-      title: target.title,
-      amount: target.amount,
-      type: target.type,
-      category: target.category,
-      paymentMethod: target.paymentMethod,
-      frequency: target.frequency,
-      startDate: target.startDate,
-      nextDate: target.nextDate,
-      endDate: target.endDate,
-      status: nextStatus,
-      autoCreate: target.autoCreate,
-      notes: target.notes,
+    const data = await apiRequest<
+      { rule?: RawRecurringResponse; data?: RawRecurringResponse } & RawRecurringResponse
+    >(`/recurring/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status: nextStatus,
+        isActive: nextStatus === 'active',
+      }),
     });
+
+    const updated: RawRecurringResponse = data?.rule ?? data?.data ?? data;
+    return normalizeRule(updated);
   },
 
   async remove(id: string): Promise<void> {
-    if (API_BASE_URL) {
-      const response = await fetch(
-        `${API_BASE_URL}/recurring/${encodeURIComponent(id)}`,
-        {
-          method: 'DELETE',
-          headers: getAuthHeaders(),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(await parseErrorMessage(response));
-      }
-      return;
-    }
-
-    const allRules = readStoredRules();
-    const filtered = allRules.filter((item) => item.id !== id);
-    writeStoredRules(filtered);
+    await apiRequest<void>(`/recurring/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
   },
 
   async triggerOccurrence(
@@ -475,49 +355,26 @@ export const recurringService = {
       },
     };
 
-    if (API_BASE_URL) {
-      const updatedRule = await this.update(rule.id, {
-        title: rule.title,
-        amount: rule.amount,
-        type: rule.type,
-        category: rule.category,
-        paymentMethod: rule.paymentMethod,
-        frequency: rule.frequency,
-        startDate: rule.startDate,
-        nextDate: computedNextDate,
-        endDate: rule.endDate,
-        status: nextStatus,
-        autoCreate: rule.autoCreate,
-        notes: rule.notes,
-      });
-
-      return {
-        updatedRule: {
-          ...updatedRule,
-          lastProcessedDate: executedDate,
-        },
-        transactionPayload,
-      };
-    }
-
-    const allRules = readStoredRules();
-    const index = allRules.findIndex((item) => item.id === rule.id);
-    const updatedRule: RecurringRule = {
-      ...rule,
+    const updatedRule = await this.update(rule.id, {
+      title: rule.title,
+      amount: rule.amount,
+      type: rule.type,
+      category: rule.category,
+      paymentMethod: rule.paymentMethod,
+      frequency: rule.frequency,
+      startDate: rule.startDate,
       nextDate: computedNextDate,
-      lastProcessedDate: executedDate,
+      endDate: rule.endDate,
       status: nextStatus,
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (index !== -1) {
-      const nextList = [...allRules];
-      nextList[index] = updatedRule;
-      writeStoredRules(nextList);
-    }
+      autoCreate: rule.autoCreate,
+      notes: rule.notes,
+    });
 
     return {
-      updatedRule,
+      updatedRule: {
+        ...updatedRule,
+        lastProcessedDate: executedDate,
+      },
       transactionPayload,
     };
   },
