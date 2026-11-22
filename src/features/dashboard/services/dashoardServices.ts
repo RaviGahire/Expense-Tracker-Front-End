@@ -1,4 +1,10 @@
-import { authService } from '../../auth/services/authService';
+import { apiRequest } from '../../../services/apiClient';
+import { accountService } from '../../accounts/services/accountService';
+import {
+  budgetService,
+  getCurrentMonthString,
+} from '../../budgets/services/budgetService';
+import { transactionService } from '../../transactions/services/transactionService';
 import type { SummaryStats } from '../components/SummaryCards';
 import type { BudgetItem } from '../components/BudgetProgressCard';
 import type { RecentTransactionItem } from '../components/RecentTransactions';
@@ -14,181 +20,238 @@ export interface DashboardData {
   cashflow: MonthlyCashflowPoint[];
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const MONTH_SHORT_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 
-function getAuthHeaders(): HeadersInit {
-  const token = authService.getToken();
+function getPeriodDateRange(period: DashboardPeriod): {
+  startDate: string;
+  endDate: string;
+  prevStartDate: string;
+  prevEndDate: string;
+} {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const todayStr = now.toISOString().slice(0, 10);
+
+  if (period === 'this_year') {
+    return {
+      startDate: `${year}-01-01`,
+      endDate: todayStr,
+      prevStartDate: `${year - 1}-01-01`,
+      prevEndDate: `${year - 1}-12-31`,
+    };
+  }
+
+  if (period === 'last_30_days') {
+    const start = new Date(now);
+    start.setDate(now.getDate() - 30);
+    const prevEnd = new Date(start);
+    prevEnd.setDate(start.getDate() - 1);
+    const prevStart = new Date(prevEnd);
+    prevStart.setDate(prevEnd.getDate() - 30);
+
+    return {
+      startDate: start.toISOString().slice(0, 10),
+      endDate: todayStr,
+      prevStartDate: prevStart.toISOString().slice(0, 10),
+      prevEndDate: prevEnd.toISOString().slice(0, 10),
+    };
+  }
+
+  // this_month
+  const start = new Date(year, month, 1);
+  const prevStart = new Date(year, month - 1, 1);
+  const prevEnd = new Date(year, month, 0);
+
   return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    startDate: start.toISOString().slice(0, 10),
+    endDate: todayStr,
+    prevStartDate: prevStart.toISOString().slice(0, 10),
+    prevEndDate: prevEnd.toISOString().slice(0, 10),
   };
 }
 
-function buildMockDashboardData(period: DashboardPeriod): DashboardData {
-  const multiplier =
-    period === 'this_year' ? 11 : period === 'last_30_days' ? 1.05 : 1;
-
-  const monthlyIncome = Math.round(95000 * multiplier);
-  const monthlyExpenses = Math.round(48250 * multiplier);
-  const totalBalance = 246800 + (monthlyIncome - monthlyExpenses);
-  const savingsRate =
-    monthlyIncome > 0
-      ? ((monthlyIncome - monthlyExpenses) / monthlyIncome) * 100
-      : 0;
-
-  return {
-    stats: {
-      totalBalance,
-      monthlyIncome,
-      monthlyExpenses,
-      savingsRate,
-      balanceChangePercent: 12.4,
-      incomeChangePercent: 6.2,
-      expenseChangePercent: -4.8,
-      savingsChangePercent: 8.1,
-    },
-    budgets: [
-      {
-        id: 'bdg_1',
-        category: 'Food & Dining',
-        spent: Math.round(9200 * (period === 'this_year' ? 10 : 1)),
-        limit: Math.round(12000 * (period === 'this_year' ? 12 : 1)),
-        period: period === 'this_year' ? 'Yearly' : 'Monthly',
-      },
-      {
-        id: 'bdg_2',
-        category: 'Housing & Rent',
-        spent: Math.round(18000 * (period === 'this_year' ? 11 : 1)),
-        limit: Math.round(18000 * (period === 'this_year' ? 12 : 1)),
-        period: period === 'this_year' ? 'Yearly' : 'Monthly',
-      },
-      {
-        id: 'bdg_3',
-        category: 'Transport & Fuel',
-        spent: Math.round(4350 * (period === 'this_year' ? 10.5 : 1)),
-        limit: Math.round(5000 * (period === 'this_year' ? 12 : 1)),
-        period: period === 'this_year' ? 'Yearly' : 'Monthly',
-      },
-      {
-        id: 'bdg_4',
-        category: 'Shopping',
-        spent: Math.round(8900 * (period === 'this_year' ? 11.5 : 1)),
-        limit: Math.round(8000 * (period === 'this_year' ? 12 : 1)),
-        period: period === 'this_year' ? 'Yearly' : 'Monthly',
-      },
-    ],
-    recentTransactions: [
-      {
-        id: 'tx_1',
-        title: 'Monthly Tech Salary',
-        category: 'Salary',
-        type: 'income',
-        amount: 95000,
-        date: '2026-11-01',
-        paymentMethod: 'Bank Transfer',
-      },
-      {
-        id: 'tx_2',
-        title: 'Apartment Rent - Pune',
-        category: 'Housing & Rent',
-        type: 'expense',
-        amount: 18000,
-        date: '2026-11-05',
-        paymentMethod: 'UPI',
-      },
-      {
-        id: 'tx_3',
-        title: 'Fresh Mart Groceries',
-        category: 'Food & Dining',
-        type: 'expense',
-        amount: 3450,
-        date: '2026-11-12',
-        paymentMethod: 'UPI',
-      },
-      {
-        id: 'tx_4',
-        title: 'Freelance UI Audit',
-        category: 'Freelance',
-        type: 'income',
-        amount: 14500,
-        date: '2026-11-15',
-        paymentMethod: 'Bank Transfer',
-      },
-      {
-        id: 'tx_5',
-        title: 'Electricity & Fiber Internet',
-        category: 'Bills & Utilities',
-        type: 'expense',
-        amount: 2680,
-        date: '2026-11-18',
-        paymentMethod: 'Debit Card',
-      },
-    ],
-    cashflow: [
-      { month: 'Jun', income: 88000, expense: 51200 },
-      { month: 'Jul', income: 92000, expense: 49800 },
-      { month: 'Aug', income: 88000, expense: 54600 },
-      { month: 'Sep', income: 96500, expense: 47900 },
-      { month: 'Oct', income: 91000, expense: 50400 },
-      { month: 'Nov', income: 109500, expense: 48250 },
-    ],
-  };
+function calcPercentChange(current: number, previous: number): number {
+  if (previous <= 0) return current > 0 ? 100 : 0;
+  return Number((((current - previous) / previous) * 100).toFixed(1));
 }
 
 export const dashboardService = {
   isRemoteEnabled(): boolean {
-    return Boolean(API_BASE_URL);
+    return true;
   },
 
   async getDashboardData(period: DashboardPeriod): Promise<DashboardData> {
-    if (API_BASE_URL) {
-      const response = await fetch(
-        `${API_BASE_URL}/api/dashboard?period=${encodeURIComponent(period)}`,
-        {
-          method: 'GET',
-          headers: getAuthHeaders(),
-        }
-      );
+    const currentMonth = getCurrentMonthString();
+    const { startDate, endDate, prevStartDate, prevEndDate } =
+      getPeriodDateRange(period);
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to load dashboard data.');
-      }
+    const [accounts, rawBudgets, allTransactions, analyticsSummary] =
+      await Promise.all([
+        accountService.getAll(),
+        budgetService.getAll(currentMonth),
+        transactionService.getAll(),
+        apiRequest<Partial<DashboardData> & { data?: Partial<DashboardData> }>(
+          `/analytics/overview?period=${encodeURIComponent(period)}`
+        ).catch(() => null),
+      ]);
 
-      return data as DashboardData;
+    const directPayload = analyticsSummary?.data ?? analyticsSummary;
+    if (
+      directPayload &&
+      directPayload.stats &&
+      Array.isArray(directPayload.budgets) &&
+      Array.isArray(directPayload.recentTransactions) &&
+      Array.isArray(directPayload.cashflow)
+    ) {
+      return directPayload as DashboardData;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    return buildMockDashboardData(period);
+    const totalBalance = accounts.reduce(
+      (sum, acc) => sum + (Number(acc.balance) || 0),
+      0
+    );
+
+    const periodTxs = allTransactions.filter(
+      (tx) => tx.date >= startDate && tx.date <= endDate
+    );
+    const prevPeriodTxs = allTransactions.filter(
+      (tx) => tx.date >= prevStartDate && tx.date <= prevEndDate
+    );
+
+    const monthlyIncome = periodTxs
+      .filter((tx) => tx.type === 'income')
+      .reduce((sum, tx) => sum + tx.amount, 0);
+    const monthlyExpenses = periodTxs
+      .filter((tx) => tx.type === 'expense')
+      .reduce((sum, tx) => sum + tx.amount, 0);
+
+    const prevIncome = prevPeriodTxs
+      .filter((tx) => tx.type === 'income')
+      .reduce((sum, tx) => sum + tx.amount, 0);
+    const prevExpenses = prevPeriodTxs
+      .filter((tx) => tx.type === 'expense')
+      .reduce((sum, tx) => sum + tx.amount, 0);
+
+    const savingsRate =
+      monthlyIncome > 0
+        ? Number(
+            (((monthlyIncome - monthlyExpenses) / monthlyIncome) * 100).toFixed(1)
+          )
+        : 0;
+    const prevSavingsRate =
+      prevIncome > 0
+        ? ((prevIncome - prevExpenses) / prevIncome) * 100
+        : 0;
+
+    // Calculate spent amount per category for budget progress cards
+    const spentByCategory = new Map<string, number>();
+    for (const tx of periodTxs) {
+      if (tx.type !== 'expense') continue;
+      const key = tx.category.trim().toLowerCase();
+      spentByCategory.set(key, (spentByCategory.get(key) ?? 0) + tx.amount);
+    }
+
+    const budgets: BudgetItem[] = rawBudgets.map((b) => ({
+      id: b.id,
+      category: b.category,
+      spent: spentByCategory.get(b.category.trim().toLowerCase()) ?? 0,
+      limit: b.limit,
+      period:
+        b.period === 'yearly'
+          ? 'Yearly'
+          : b.period === 'weekly'
+          ? 'Weekly'
+          : 'Monthly',
+    }));
+
+    const recentTransactions: RecentTransactionItem[] = [...allTransactions]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 6)
+      .map((tx) => ({
+        id: tx.id,
+        title: tx.title,
+        category: tx.category,
+        type: tx.type,
+        amount: tx.amount,
+        date: tx.date,
+        paymentMethod: tx.paymentMethod,
+      }));
+
+    // Build last 6 months cashflow series from live transactions
+    const now = new Date();
+    const cashflow: MonthlyCashflowPoint[] = [];
+    for (let offset = 5; offset >= 0; offset--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const monthTxs = allTransactions.filter((tx) => tx.date.startsWith(ym));
+
+      cashflow.push({
+        month: MONTH_SHORT_NAMES[d.getMonth()],
+        income: monthTxs
+          .filter((tx) => tx.type === 'income')
+          .reduce((sum, tx) => sum + tx.amount, 0),
+        expense: monthTxs
+          .filter((tx) => tx.type === 'expense')
+          .reduce((sum, tx) => sum + tx.amount, 0),
+      });
+    }
+
+    return {
+      stats: {
+        totalBalance,
+        monthlyIncome,
+        monthlyExpenses,
+        savingsRate,
+        balanceChangePercent: calcPercentChange(
+          monthlyIncome - monthlyExpenses,
+          prevIncome - prevExpenses
+        ),
+        incomeChangePercent: calcPercentChange(monthlyIncome, prevIncome),
+        expenseChangePercent: calcPercentChange(monthlyExpenses, prevExpenses),
+        savingsChangePercent: Number(
+          (savingsRate - prevSavingsRate).toFixed(1)
+        ),
+      },
+      budgets,
+      recentTransactions,
+      cashflow,
+    };
   },
 
   async createQuickTransaction(
     payload: QuickTransactionPayload
   ): Promise<RecentTransactionItem> {
-    if (API_BASE_URL) {
-      const response = await fetch(`${API_BASE_URL}/api/transactions`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to save transaction.');
-      }
-
-      return (data.transaction ?? data) as RecentTransactionItem;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    return {
-      id: `tx_${Date.now()}`,
+    const created = await transactionService.create({
       title: payload.title,
-      category: payload.category,
-      type: payload.type,
       amount: payload.amount,
-      date: payload.date,
+      type: payload.type,
+      category: payload.category,
       paymentMethod: payload.paymentMethod,
+      date: payload.date,
+    });
+
+    return {
+      id: created.id,
+      title: created.title,
+      category: created.category,
+      type: created.type,
+      amount: created.amount,
+      date: created.date,
+      paymentMethod: created.paymentMethod,
     };
   },
 };
