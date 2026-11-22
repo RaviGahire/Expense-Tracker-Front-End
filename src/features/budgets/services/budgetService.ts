@@ -1,25 +1,28 @@
+import { apiRequest } from '../../../services/apiClient';
+import { categoryService } from '../../categories/services/categoryService';
 import type {
   BudgetItem,
   BudgetPayload,
   BudgetPeriod,
 } from '../types/budget.types';
 
-const STORAGE_KEY = 'fintrack_budgets_v1';
-const TOKEN_STORAGE_KEY = 'fintrack_auth_token';
-const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
-
 interface RawBudgetResponse {
   id?: string;
   _id?: string;
   category?: string;
+  categoryId?: string | { _id?: string; id?: string; name?: string; label?: string };
   limit?: number | string;
+  amount?: number | string;
   period?: BudgetPeriod;
-  month?: string;
+  month?: number | string;
+  year?: number | string;
   alertThreshold?: number | string;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
 }
+
+const OBJECT_ID_REGEX = /^[0-9a-fA-F]{24}$/;
 
 export function getCurrentMonthString(): string {
   const now = new Date();
@@ -43,20 +46,61 @@ export function getPreviousMonthString(monthString: string): string {
   return `${prevYear}-${prevMonth}`;
 }
 
-function generateLocalId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `budget_${crypto.randomUUID()}`;
+function parseMonthYear(monthString?: string): { month: number; year: number } {
+  const now = new Date();
+  const fallback = { month: now.getMonth() + 1, year: now.getFullYear() };
+
+  if (!monthString) return fallback;
+
+  const [yearStr, monthStr] = monthString.split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    month < 1 ||
+    month > 12
+  ) {
+    return fallback;
   }
-  return `budget_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  return { month, year };
+}
+
+function formatMonthYear(rawMonth?: number | string, rawYear?: number | string): string {
+  if (typeof rawMonth === 'string' && /^\d{4}-\d{2}$/.test(rawMonth)) {
+    return rawMonth;
+  }
+
+  const monthNum = Number(rawMonth);
+  const yearNum = Number(rawYear) || new Date().getFullYear();
+
+  if (Number.isInteger(monthNum) && monthNum >= 1 && monthNum <= 12) {
+    return `${yearNum}-${String(monthNum).padStart(2, '0')}`;
+  }
+
+  return getCurrentMonthString();
+}
+
+function extractCategoryName(
+  ref?: string | { name?: string; label?: string } | null
+): string | undefined {
+  if (!ref || typeof ref === 'string') return undefined;
+  return ref.label ?? ref.name;
 }
 
 function normalizeBudget(raw: RawBudgetResponse): BudgetItem {
-  const parsedLimit = Number(raw.limit);
+  const parsedLimit = Number(raw.limit ?? raw.amount);
   const parsedThreshold = Number(raw.alertThreshold);
+  const categoryName =
+    extractCategoryName(raw.categoryId) ??
+    (raw.category && !OBJECT_ID_REGEX.test(raw.category) ? raw.category : undefined) ??
+    'Other Expense';
 
   return {
-    id: String(raw.id ?? raw._id ?? generateLocalId()),
-    category: String(raw.category ?? 'Other Expense').trim(),
+    id: String(raw.id ?? raw._id ?? ''),
+    category: String(categoryName).trim(),
     limit: !Number.isNaN(parsedLimit) && parsedLimit > 0 ? parsedLimit : 0,
     period:
       raw.period === 'weekly' ||
@@ -64,7 +108,7 @@ function normalizeBudget(raw: RawBudgetResponse): BudgetItem {
       raw.period === 'monthly'
         ? raw.period
         : 'monthly',
-    month: String(raw.month ?? getCurrentMonthString()),
+    month: formatMonthYear(raw.month, raw.year),
     alertThreshold:
       !Number.isNaN(parsedThreshold) &&
       parsedThreshold >= 50 &&
@@ -77,272 +121,121 @@ function normalizeBudget(raw: RawBudgetResponse): BudgetItem {
   };
 }
 
-function buildSeedBudgets(month: string): BudgetItem[] {
-  const nowIso = new Date().toISOString();
+async function resolveBackendBudgetBody(payload: BudgetPayload) {
+  const categoryName = payload.category.trim();
+  let categoryId = OBJECT_ID_REGEX.test(categoryName)
+    ? categoryName
+    : undefined;
 
-  return [
-    {
-      id: 'seed_budget_food',
-      category: 'Food & Dining',
-      limit: 8000,
-      period: 'monthly',
-      month,
-      alertThreshold: 80,
-      notes: 'Groceries, dining out, and daily tea/coffee',
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-    {
-      id: 'seed_budget_housing',
-      category: 'Housing & Rent',
-      limit: 18000,
-      period: 'monthly',
-      month,
-      alertThreshold: 90,
-      notes: 'Monthly apartment rent and society maintenance',
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-    {
-      id: 'seed_budget_transport',
-      category: 'Transport & Fuel',
-      limit: 3500,
-      period: 'monthly',
-      month,
-      alertThreshold: 80,
-      notes: 'Fuel, metro pass, and cab rides',
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-    {
-      id: 'seed_budget_bills',
-      category: 'Bills & Utilities',
-      limit: 4000,
-      period: 'monthly',
-      month,
-      alertThreshold: 85,
-      notes: 'Electricity, broadband internet, and mobile recharge',
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-    {
-      id: 'seed_budget_shopping',
-      category: 'Shopping',
-      limit: 5000,
-      period: 'monthly',
-      month,
-      alertThreshold: 75,
-      notes: 'Apparel, electronics, and household items',
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    },
-  ];
-}
+  if (!categoryId && categoryName) {
+    const categories = await categoryService.getAll();
+    const targetName = categoryName.toLowerCase();
+    const matched =
+      categories.find(
+        (c) =>
+          c.type === 'expense' &&
+          (c.label.toLowerCase() === targetName || c.value.toLowerCase() === targetName)
+      ) ??
+      categories.find(
+        (c) =>
+          c.label.toLowerCase() === targetName || c.value.toLowerCase() === targetName
+      );
 
-function readStoredBudgets(): BudgetItem[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      const seeded = buildSeedBudgets(getCurrentMonthString());
-      writeStoredBudgets(seeded);
-      return seeded;
+    if (matched?.id && OBJECT_ID_REGEX.test(matched.id)) {
+      categoryId = matched.id;
+    } else {
+      // Auto-create the category in MongoDB if it doesn't exist yet so categoryId is always valid
+      const createdCategory = await categoryService.create({
+        label: categoryName,
+        type: 'expense',
+        color: 'brand',
+        iconName: 'IconCategory',
+      });
+      categoryId = createdCategory.id;
     }
-
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed.map((entry) => normalizeBudget(entry as RawBudgetResponse));
-  } catch {
-    return [];
   }
-}
 
-function writeStoredBudgets(budgets: BudgetItem[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(budgets));
-  } catch {
-    // Ignore storage quota errors in restricted browser contexts
-  }
-}
+  const { month, year } = parseMonthYear(payload.month);
+  const numericLimit = Number(payload.limit);
+  const numericThreshold = Number(payload.alertThreshold);
 
-function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
   return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    categoryId,
+    category: categoryName,
+    limit: numericLimit,
+    amount: numericLimit,
+    period: payload.period,
+    month,
+    year,
+    ...(Number.isFinite(numericThreshold)
+      ? { alertThreshold: numericThreshold }
+      : {}),
+    ...(payload.notes?.trim() ? { notes: payload.notes.trim() } : {}),
   };
 }
 
-async function parseErrorMessage(response: Response): Promise<string> {
-  try {
-    const data = await response.json();
-    if (typeof data?.message === 'string' && data.message.trim()) {
-      return data.message;
-    }
-  } catch {
-    // Fall back to HTTP status text
-  }
-  return `Request failed with status ${response.status}`;
-}
-
 export const budgetService = {
-  async getAll(month?: string): Promise<BudgetItem[]> {
-    if (API_BASE_URL) {
-      const query = month ? `?month=${encodeURIComponent(month)}` : '';
-      const response = await fetch(`${API_BASE_URL}/budgets${query}`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) {
-        throw new Error(await parseErrorMessage(response));
-      }
-
-      const data = await response.json();
-      const list: RawBudgetResponse[] = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.budgets)
-        ? data.budgets
-        : Array.isArray(data?.data)
-        ? data.data
-        : [];
-
-      return list.map(normalizeBudget);
+  async getAll(monthString?: string): Promise<BudgetItem[]> {
+    let query = '';
+    if (monthString) {
+      const { month, year } = parseMonthYear(monthString);
+      query = `?month=${month}&year=${year}`;
     }
 
-    const allBudgets = readStoredBudgets();
-    if (!month) return allBudgets;
-    return allBudgets.filter((item) => item.month === month);
+    const data = await apiRequest<
+      { budgets?: RawBudgetResponse[]; data?: RawBudgetResponse[] } | RawBudgetResponse[]
+    >(`/budgets${query}`);
+
+    const list: RawBudgetResponse[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.budgets)
+      ? data.budgets
+      : Array.isArray(data?.data)
+      ? data.data
+      : [];
+
+    return list.map(normalizeBudget);
   },
 
   async create(payload: BudgetPayload): Promise<BudgetItem> {
-    if (API_BASE_URL) {
-      const response = await fetch(`${API_BASE_URL}/budgets`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
+    const body = await resolveBackendBudgetBody(payload);
+    const data = await apiRequest<
+      { budget?: RawBudgetResponse; data?: RawBudgetResponse } & RawBudgetResponse
+    >('/budgets', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
 
-      if (!response.ok) {
-        throw new Error(await parseErrorMessage(response));
-      }
-
-      const data = await response.json();
-      const created: RawBudgetResponse = data?.budget ?? data?.data ?? data;
-      return normalizeBudget(created);
-    }
-
-    const allBudgets = readStoredBudgets();
-    const duplicate = allBudgets.some(
-      (item) =>
-        item.month === payload.month &&
-        item.category.trim().toLowerCase() ===
-          payload.category.trim().toLowerCase()
-    );
-
-    if (duplicate) {
-      throw new Error(
-        `A budget for "${payload.category}" already exists for ${payload.month}.`
-      );
-    }
-
-    const nowIso = new Date().toISOString();
-    const newBudget: BudgetItem = {
-      id: generateLocalId(),
-      category: payload.category.trim(),
-      limit: Number(payload.limit),
-      period: payload.period,
-      month: payload.month,
-      alertThreshold: Number(payload.alertThreshold),
-      notes: payload.notes?.trim() || undefined,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
-
-    writeStoredBudgets([newBudget, ...allBudgets]);
-    return newBudget;
+    const created: RawBudgetResponse = data?.budget ?? data?.data ?? data;
+    return normalizeBudget({
+      ...created,
+      category: created.category ?? payload.category,
+    });
   },
 
   async update(id: string, payload: BudgetPayload): Promise<BudgetItem> {
-    if (API_BASE_URL) {
-      const response = await fetch(
-        `${API_BASE_URL}/budgets/${encodeURIComponent(id)}`,
-        {
-          method: 'PUT',
-          headers: getAuthHeaders(),
-          body: JSON.stringify(payload),
-        }
-      );
+    const body = await resolveBackendBudgetBody(payload);
+    const data = await apiRequest<
+      { budget?: RawBudgetResponse; data?: RawBudgetResponse } & RawBudgetResponse
+    >(`/budgets/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ...body,
+        notes: payload.notes?.trim() || null,
+      }),
+    });
 
-      if (!response.ok) {
-        throw new Error(await parseErrorMessage(response));
-      }
-
-      const data = await response.json();
-      const updated: RawBudgetResponse = data?.budget ?? data?.data ?? data;
-      return normalizeBudget(updated);
-    }
-
-    const allBudgets = readStoredBudgets();
-    const index = allBudgets.findIndex((item) => item.id === id);
-
-    if (index === -1) {
-      throw new Error('Budget not found.');
-    }
-
-    const duplicate = allBudgets.some(
-      (item) =>
-        item.id !== id &&
-        item.month === payload.month &&
-        item.category.trim().toLowerCase() ===
-          payload.category.trim().toLowerCase()
-    );
-
-    if (duplicate) {
-      throw new Error(
-        `A budget for "${payload.category}" already exists for ${payload.month}.`
-      );
-    }
-
-    const updatedBudget: BudgetItem = {
-      ...allBudgets[index],
-      category: payload.category.trim(),
-      limit: Number(payload.limit),
-      period: payload.period,
-      month: payload.month,
-      alertThreshold: Number(payload.alertThreshold),
-      notes: payload.notes?.trim() || undefined,
-      updatedAt: new Date().toISOString(),
-    };
-
-    const nextList = [...allBudgets];
-    nextList[index] = updatedBudget;
-    writeStoredBudgets(nextList);
-
-    return updatedBudget;
+    const updated: RawBudgetResponse = data?.budget ?? data?.data ?? data;
+    return normalizeBudget({
+      ...updated,
+      category: updated.category ?? payload.category,
+    });
   },
 
   async remove(id: string): Promise<void> {
-    if (API_BASE_URL) {
-      const response = await fetch(
-        `${API_BASE_URL}/budgets/${encodeURIComponent(id)}`,
-        {
-          method: 'DELETE',
-          headers: getAuthHeaders(),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(await parseErrorMessage(response));
-      }
-      return;
-    }
-
-    const allBudgets = readStoredBudgets();
-    const filtered = allBudgets.filter((item) => item.id !== id);
-    writeStoredBudgets(filtered);
+    await apiRequest<void>(`/budgets/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
   },
 
   async copyFromPreviousMonth(targetMonth: string): Promise<BudgetItem[]> {
