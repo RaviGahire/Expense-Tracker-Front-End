@@ -1,36 +1,172 @@
+import { apiRequest } from '../../../services/apiClient';
 import { authService } from '../../auth/services/authService';
+import { accountService } from '../../accounts/services/accountService';
+import { categoryService } from '../../categories/services/categoryService';
 import type { TransactionFormValues } from '../components/TransactionForm';
 import type { TransactionRecord } from '../components/TransactionItem';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+export type TransactionSubmitPayload = TransactionFormValues & {
+  accountId?: string;
+  toAccountId?: string;
+  categoryId?: string;
+  attachment?: File | null;
+  removeExistingAttachment?: boolean;
+};
 
-function getAuthHeaders(includeJsonContentType: boolean = true): HeadersInit {
-  const token = authService.getToken();
+interface RawTransactionResponse {
+  id?: string;
+  _id?: string;
+  title?: string;
+  amount?: number | string;
+  type?: 'income' | 'expense' | 'transfer';
+  category?: string;
+  categoryId?: string | { _id?: string; id?: string; name?: string; label?: string };
+  accountId?: string | { _id?: string; id?: string; name?: string };
+  toAccountId?: string | { _id?: string; id?: string; name?: string };
+  paymentMethod?: string;
+  date?: string;
+  notes?: string;
+  recurring?: TransactionRecord['recurring'];
+  existingAttachment?: TransactionRecord['existingAttachment'];
+}
+
+const OBJECT_ID_REGEX = /^[0-9a-fA-F]{24}$/;
+
+function ensureAuthenticatedHeaders(): Record<string, string> {
+  const token =
+    authService.getToken() ||
+    localStorage.getItem('expense_tracker_token') ||
+    localStorage.getItem('token') ||
+    localStorage.getItem('auth_token');
+
+  if (!token) {
+    authService.logout();
+    window.location.href = '/login';
+    throw new Error('Session expired or token is missing. Please log in again.');
+  }
+
   return {
-    ...(includeJsonContentType ? { 'Content-Type': 'application/json' } : {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    Authorization: `Bearer ${token}`,
+  };
+}
+
+function extractName(
+  ref?: string | { name?: string; label?: string } | null
+): string | undefined {
+  if (!ref || typeof ref === 'string') return undefined;
+  return ref.label ?? ref.name;
+}
+
+function normalizeTransaction(raw: RawTransactionResponse): TransactionRecord {
+  const categoryName =
+    extractName(raw.categoryId) ??
+    (raw.category && !OBJECT_ID_REGEX.test(raw.category) ? raw.category : undefined) ??
+    'Uncategorized';
+
+  const accountName =
+    extractName(raw.accountId) ?? raw.paymentMethod ?? 'Account';
+
+  const formattedDate = raw.date
+    ? String(raw.date).slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+
+  return {
+    id: String(raw.id ?? raw._id ?? ''),
+    title: String(raw.title ?? '').trim(),
+    amount: Number(raw.amount) || 0,
+    type: (raw.type === 'income' ? 'income' : 'expense') as TransactionRecord['type'],
+    category: categoryName,
+    paymentMethod: accountName as TransactionRecord['paymentMethod'],
+    date: formattedDate,
+    notes: raw.notes,
+    recurring: raw.recurring,
+    existingAttachment: raw.existingAttachment ?? null,
+  };
+}
+
+async function resolveBackendPayload(payload: TransactionSubmitPayload) {
+  let accountId = payload.accountId;
+  let categoryId =
+    payload.categoryId ??
+    (payload.category && OBJECT_ID_REGEX.test(payload.category)
+      ? payload.category
+      : undefined);
+
+  // Resolve accountId from paymentMethod (or fall back to default/first account)
+  if (!accountId || !OBJECT_ID_REGEX.test(accountId)) {
+    const accounts = await accountService.getAll();
+    const pm = (payload.paymentMethod ?? '').toLowerCase();
+    const matchedAccount =
+      accounts.find((a) => a.name.toLowerCase() === pm) ??
+      accounts.find((a) => pm.includes('cash') && a.type === 'cash') ??
+      accounts.find((a) => pm.includes('credit') && a.type === 'credit_card') ??
+      accounts.find((a) => pm.includes('upi') && a.type === 'wallet') ??
+      accounts.find((a) => pm.includes('bank') && a.type === 'bank') ??
+      accounts.find((a) => a.isDefault) ??
+      accounts[0];
+
+    if (!matchedAccount?.id) {
+      throw new Error('Please create at least one account before adding transactions.');
+    }
+    accountId = matchedAccount.id;
+  }
+
+  // Resolve categoryId from category name if not already an ObjectId
+  if (!categoryId && payload.category) {
+    const categories = await categoryService.getAll();
+    const catName = payload.category.trim().toLowerCase();
+    const matchedCategory =
+      categories.find(
+        (c) =>
+          c.type === payload.type &&
+          (c.label.toLowerCase() === catName || c.value.toLowerCase() === catName)
+      ) ??
+      categories.find(
+        (c) =>
+          c.label.toLowerCase() === catName || c.value.toLowerCase() === catName
+      );
+
+    if (matchedCategory?.id && OBJECT_ID_REGEX.test(matchedCategory.id)) {
+      categoryId = matchedCategory.id;
+    }
+  }
+
+  return {
+    title: payload.title.trim(),
+    amount: Number(payload.amount),
+    type: payload.type,
+    accountId,
+    ...(payload.toAccountId ? { toAccountId: payload.toAccountId } : {}),
+    ...(categoryId ? { categoryId } : {}),
+    paymentMethod: payload.paymentMethod,
+    date: payload.date,
+    ...(payload.notes?.trim() ? { notes: payload.notes.trim() } : {}),
+    ...(payload.recurring?.isRecurring ? { recurring: payload.recurring } : {}),
   };
 }
 
 export function buildTransactionFormData(
-  values: TransactionFormValues & {
-    attachment?: File | null;
-    removeExistingAttachment?: boolean;
-  }
+  values: TransactionSubmitPayload,
+  resolvedBody?: Record<string, unknown>
 ): FormData {
   const formData = new FormData();
-  formData.append('title', values.title);
-  formData.append('amount', String(values.amount));
-  formData.append('type', values.type);
-  formData.append('category', values.category);
-  formData.append('paymentMethod', values.paymentMethod);
-  formData.append('date', values.date);
+  const body = resolvedBody ?? values;
+
+  formData.append('title', String(body.title ?? values.title));
+  formData.append('amount', String(body.amount ?? values.amount));
+  formData.append('type', String(body.type ?? values.type));
+  if (body.accountId) formData.append('accountId', String(body.accountId));
+  if (body.toAccountId) formData.append('toAccountId', String(body.toAccountId));
+  if (body.categoryId) formData.append('categoryId', String(body.categoryId));
+  if (values.category) formData.append('category', values.category);
+  if (values.paymentMethod) formData.append('paymentMethod', values.paymentMethod);
+  formData.append('date', String(body.date ?? values.date));
 
   if (values.notes) {
     formData.append('notes', values.notes);
   }
   if (values?.recurring?.isRecurring) {
-    formData.append('recurring', JSON.stringify(values?.recurring));
+    formData.append('recurring', JSON.stringify(values.recurring));
   }
   if (values.attachment) {
     formData.append('attachment', values.attachment);
@@ -42,236 +178,94 @@ export function buildTransactionFormData(
   return formData;
 }
 
-const INITIAL_MOCK_TRANSACTIONS: TransactionRecord[] = [
-  {
-    id: 'tx_101',
-    title: 'Monthly Tech Salary',
-    amount: 95000,
-    type: 'income',
-    category: 'Salary',
-    paymentMethod: 'Bank Transfer',
-    date: '2026-11-01',
-    notes: 'November payroll deposit',
-    recurring: {
-      isRecurring: true,
-      frequency: 'monthly',
-      nextDate: '2026-12-01',
-    },
-  },
-  {
-    id: 'tx_102',
-    title: 'Apartment Rent - Pune',
-    amount: 18000,
-    type: 'expense',
-    category: 'Housing & Rent',
-    paymentMethod: 'UPI',
-    date: '2026-11-05',
-    notes: '2BHK monthly rent transfer',
-    recurring: {
-      isRecurring: true,
-      frequency: 'monthly',
-      nextDate: '2026-12-05',
-    },
-  },
-  {
-    id: 'tx_103',
-    title: 'Fresh Mart Superstore',
-    amount: 3450,
-    type: 'expense',
-    category: 'Food & Dining',
-    paymentMethod: 'UPI',
-    date: '2026-11-12',
-    notes: 'Weekly groceries and pantry supplies',
-  },
-  {
-    id: 'tx_104',
-    title: 'Freelance UI Audit',
-    amount: 14500,
-    type: 'income',
-    category: 'Freelance',
-    paymentMethod: 'Bank Transfer',
-    date: '2026-11-15',
-    notes: 'Design system review milestone #2',
-  },
-  {
-    id: 'tx_105',
-    title: 'MSEDCL Electricity & Fiber Internet',
-    amount: 2680,
-    type: 'expense',
-    category: 'Bills & Utilities',
-    paymentMethod: 'Debit Card',
-    date: '2026-11-18',
-    recurring: {
-      isRecurring: true,
-      frequency: 'monthly',
-      nextDate: '2026-12-18',
-    },
-  },
-  {
-    id: 'tx_106',
-    title: 'IndianOil Fuel Refill',
-    amount: 2200,
-    type: 'expense',
-    category: 'Transport & Fuel',
-    paymentMethod: 'Credit Card',
-    date: '2026-11-19',
-  },
-  {
-    id: 'tx_107',
-    title: 'Mechanical Keyboard & Desk Mat',
-    amount: 6400,
-    type: 'expense',
-    category: 'Shopping',
-    paymentMethod: 'Credit Card',
-    date: '2026-11-20',
-    notes: 'Home office workstation upgrade',
-  },
-];
-
-export type TransactionSubmitPayload = TransactionFormValues & {
-  attachment?: File | null;
-  removeExistingAttachment?: boolean;
-};
-
 export const transactionService = {
   isRemoteEnabled(): boolean {
-    return Boolean(API_BASE_URL);
+    return true;
   },
 
-  async getAll(): Promise<TransactionRecord[]> {
-    if (API_BASE_URL) {
-      const response = await fetch(`${API_BASE_URL}/api/transactions`, {
-        method: 'GET',
-        headers: getAuthHeaders(true),
-      });
+  async getAll(queryString: string = ''): Promise<TransactionRecord[]> {
+    const authHeaders = ensureAuthenticatedHeaders();
+    const suffix = queryString
+      ? queryString.startsWith('?')
+        ? queryString
+        : `?${queryString}`
+      : '';
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to load transactions.');
-      }
+    const data = await apiRequest<
+      | { transactions?: RawTransactionResponse[]; data?: RawTransactionResponse[] }
+      | RawTransactionResponse[]
+    >(`/transactions${suffix}`, {
+      headers: authHeaders,
+    });
 
-      return (Array.isArray(data) ? data : data.transactions) as TransactionRecord[];
-    }
+    const list: RawTransactionResponse[] = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.transactions)
+      ? data.transactions
+      : Array.isArray(data?.data)
+      ? data.data
+      : [];
 
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    return [...INITIAL_MOCK_TRANSACTIONS];
+    return list.map(normalizeTransaction);
   },
 
   async create(payload: TransactionSubmitPayload): Promise<TransactionRecord> {
-    if (API_BASE_URL) {
-      const hasFile = Boolean(payload.attachment);
-      const response = await fetch(`${API_BASE_URL}/api/transactions`, {
-        method: 'POST',
-        headers: getAuthHeaders(!hasFile),
-        body: hasFile
-          ? buildTransactionFormData(payload)
-          : JSON.stringify(payload),
-      });
+    const authHeaders = ensureAuthenticatedHeaders();
+    const resolvedBody = await resolveBackendPayload(payload);
+    const hasFile = Boolean(payload.attachment);
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to create transaction.');
-      }
+    const data = await apiRequest<
+      { transaction?: RawTransactionResponse; data?: RawTransactionResponse } & RawTransactionResponse
+    >('/transactions', {
+      method: 'POST',
+      headers: authHeaders,
+      body: hasFile
+        ? buildTransactionFormData(payload, resolvedBody)
+        : JSON.stringify(resolvedBody),
+    });
 
-      return (data.transaction ?? data) as TransactionRecord;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    return {
-      id: `tx_${Date.now()}`,
-      title: payload.title,
-      amount: payload.amount,
-      type: payload.type,
-      category: payload.category,
-      paymentMethod: payload.paymentMethod,
-      date: payload.date,
-      notes: payload.notes,
-      recurring: payload.recurring,
-      existingAttachment: payload.attachment
-        ? {
-            name: payload.attachment.name,
-            url: URL.createObjectURL(payload.attachment),
-            mimeType: payload.attachment.type,
-            sizeBytes: payload.attachment.size,
-          }
-        : null,
-    };
+    const created = (data.transaction ?? data.data ?? data) as RawTransactionResponse;
+    return normalizeTransaction({
+      ...created,
+      category: created.category ?? payload.category,
+      paymentMethod: created.paymentMethod ?? payload.paymentMethod,
+    });
   },
 
   async update(
     id: string,
     payload: TransactionSubmitPayload,
-    currentRecord?: TransactionRecord | null
+    _currentRecord?: TransactionRecord | null
   ): Promise<TransactionRecord> {
-    if (API_BASE_URL) {
-      const hasMultipart = Boolean(
-        payload.attachment || payload.removeExistingAttachment
-      );
-      const response = await fetch(
-        `${API_BASE_URL}/api/transactions/${encodeURIComponent(id)}`,
-        {
-          method: 'PUT',
-          headers: getAuthHeaders(!hasMultipart),
-          body: hasMultipart
-            ? buildTransactionFormData(payload)
-            : JSON.stringify(payload),
-        }
-      );
+    const authHeaders = ensureAuthenticatedHeaders();
+    const resolvedBody = await resolveBackendPayload(payload);
+    const hasMultipart = Boolean(
+      payload.attachment || payload.removeExistingAttachment
+    );
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to update transaction.');
-      }
+    const data = await apiRequest<
+      { transaction?: RawTransactionResponse; data?: RawTransactionResponse } & RawTransactionResponse
+    >(`/transactions/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: hasMultipart
+        ? buildTransactionFormData(payload, resolvedBody)
+        : JSON.stringify(resolvedBody),
+    });
 
-      return (data.transaction ?? data) as TransactionRecord;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
-    let nextAttachment = currentRecord?.existingAttachment ?? null;
-    if (payload.removeExistingAttachment) {
-      nextAttachment = null;
-    }
-    if (payload.attachment) {
-      nextAttachment = {
-        name: payload.attachment.name,
-        url: URL.createObjectURL(payload.attachment),
-        mimeType: payload.attachment.type,
-        sizeBytes: payload.attachment.size,
-      };
-    }
-
-    return {
-      id,
-      title: payload.title,
-      amount: payload.amount,
-      type: payload.type,
-      category: payload.category,
-      paymentMethod: payload.paymentMethod,
-      date: payload.date,
-      notes: payload.notes,
-      recurring: payload.recurring,
-      existingAttachment: nextAttachment,
-    };
+    const updated = (data.transaction ?? data.data ?? data) as RawTransactionResponse;
+    return normalizeTransaction({
+      ...updated,
+      category: updated.category ?? payload.category,
+      paymentMethod: updated.paymentMethod ?? payload.paymentMethod,
+    });
   },
 
   async remove(id: string): Promise<void> {
-    if (API_BASE_URL) {
-      const response = await fetch(
-        `${API_BASE_URL}/api/transactions/${encodeURIComponent(id)}`,
-        {
-          method: 'DELETE',
-          headers: getAuthHeaders(true),
-        }
-      );
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.message || 'Failed to delete transaction.');
-      }
-      return;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    const authHeaders = ensureAuthenticatedHeaders();
+    await apiRequest<void>(`/transactions/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
   },
 };
