@@ -230,7 +230,7 @@ export const Navbar = () => {
                                     <div className="flex flex-col gap-4">
                                         <div className="flex items-center gap-3">
                                             <img
-                                                src={user?.avatar}
+                                                src={user?.avatar || "https://media.istockphoto.com/id/1495088043/vector/user-profile-icon-avatar-or-person-icon-profile-picture-portrait-symbol-default-portrait.jpg?s=2048x2048&w=is&k=20&c=wMTCZdfcnfH8GFWojm54r2NRaHuoQZyv7JxrdQmchkc="}
                                                 alt={user?.name}
                                                 className="h-10 w-10 rounded-full border border-brand object-cover"
                                             />
