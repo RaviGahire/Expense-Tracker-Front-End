@@ -2,6 +2,8 @@ import { authService } from '../features/auth/services/authService';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
+const PUBLIC_AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password'];
+
 function getAuthToken(): string | null {
   const token = authService.getToken?.();
   if (token) return token;
@@ -38,9 +40,23 @@ export async function apiRequest<T>(
   });
 
   if (response.status === 401) {
-    authService.logout();
-    window.location.href = '/login';
-    throw new Error('Session expired. Please log in again.');
+    const isAuthEndpoint = path.startsWith('/auth/');
+    const isOnPublicAuthPage = PUBLIC_AUTH_PATHS.some((publicPath) =>
+      window.location.pathname.startsWith(publicPath)
+    );
+
+    if (!isAuthEndpoint) {
+      authService.logout();
+      if (!isOnPublicAuthPage) {
+        window.location.replace('/login');
+      }
+    }
+
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      (errorData as { message?: string }).message ||
+        'Session expired. Please log in again.'
+    );
   }
 
   if (response.status === 204) {
