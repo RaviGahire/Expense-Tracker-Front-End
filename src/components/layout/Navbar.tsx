@@ -14,6 +14,7 @@ import {
     IconRepeat,
     IconTargetArrow,
     IconBuildingBank,
+    IconUser,
 } from "@tabler/icons-react";
 import { Button } from "../ui/Button";
 import { useAuth } from "../../features/auth";
@@ -100,7 +101,7 @@ export const Navbar = () => {
                                         className="h-auto gap-2.5 rounded-full bg-surface p-1 pr-3.5"
                                     >
                                         <img
-                                            src={user?.avatar}
+                                            src={user?.avatar || "https://media.istockphoto.com/id/1495088043/vector/user-profile-icon-avatar-or-person-icon-profile-picture-portrait-symbol-default-portrait.jpg?s=2048x2048&w=is&k=20&c=wMTCZdfcnfH8GFWojm54r2NRaHuoQZyv7JxrdQmchkc=" }
                                             alt={user?.name}
                                             className="h-8 w-8 rounded-full border border-brand/50 object-cover"
                                         />
